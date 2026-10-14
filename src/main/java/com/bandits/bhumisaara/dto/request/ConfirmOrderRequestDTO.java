@@ -19,4 +19,5 @@ import lombok.NoArgsConstructor;
 public class ConfirmOrderRequestDTO {
 
     private String creditTransferHash;
+    private String creditTokenId;
 }

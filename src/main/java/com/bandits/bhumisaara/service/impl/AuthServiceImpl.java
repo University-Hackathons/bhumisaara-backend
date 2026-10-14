@@ -170,7 +170,12 @@ public class AuthServiceImpl implements AuthService {
 
         try {
             Long userId = jwtService.extractUserId(jwt);
-            String role = jwtService.extractRole(jwt);
+            String username = jwtService.extractUsername(jwt);
+            UserEntity user = userRepository.findByUsername(username)
+                    .orElseThrow(() -> new InvalidTokenException("Invalid token"));
+            if (!user.isEnabled() || !jwtService.isTokenValid(jwt, user))
+                throw new InvalidTokenException("Invalid token");
+            String role = user.getRole().getRoleName().name();
 
             if (userId == null) {
                 throw new InvalidTokenException("Invalid token: missing user ID claim");

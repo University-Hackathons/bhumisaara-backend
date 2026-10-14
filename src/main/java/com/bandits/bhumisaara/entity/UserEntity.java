@@ -32,6 +32,12 @@ public class UserEntity implements UserDetails {
     @Column(nullable = false)
     private String password;
 
+    @Builder.Default
+    @Column(name = "session_version")
+    private Long sessionVersion = 0L;
+
+    public Long getSessionVersion() { return sessionVersion == null ? 0L : sessionVersion; }
+
     @Column(name = "wallet_address", length = 42, unique = true)
     private String walletAddress;
 

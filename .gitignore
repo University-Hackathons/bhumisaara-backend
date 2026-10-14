@@ -30,6 +30,7 @@ build/
 !**/src/test/**/build/
 
 .env*
+!.env.example
 
 ### VS Code ###
 .vscode/

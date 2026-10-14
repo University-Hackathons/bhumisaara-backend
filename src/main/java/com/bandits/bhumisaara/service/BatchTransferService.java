@@ -60,6 +60,7 @@ public class BatchTransferService {
     private final UserRepository userRepository;
     private final AreaRepository areaRepository;
     private final CurrentUserProvider currentUserProvider;
+    private final ChainTransactionVerifier chainVerifier;
 
     /**
      * The admin's distribution queue: one row per (area, fertilizer type) that
@@ -160,6 +161,11 @@ public class BatchTransferService {
                     "Scanned sacks weigh " + scannedKg + "kg but amount_kg is " + request.getAmountKg()
                             + " — the recorded amount must match the sacks handed over");
         }
+
+        if (!batch.getTokenId().equals(request.getTokenId()))
+            throw new IllegalArgumentException("Batch token mismatch");
+        chainVerifier.verifyTransfer(request.getTransactionHash(), admin.getWalletAddress(),
+                officer.getWalletAddress(), batch.getTokenId(), request.getAmountKg());
 
         BatchTransferEntity transfer = transferRepository.save(BatchTransferEntity.builder()
                 .batchId(batch.getBatchId())

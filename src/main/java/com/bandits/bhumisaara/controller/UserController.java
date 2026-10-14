@@ -11,6 +11,9 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import java.util.Map;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -59,6 +62,12 @@ public class UserController {
                 .ok()
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(userAccountService.getMyWalletAddress());
+    }
+
+    @PostMapping("/me/wallet/challenge")
+    @PreAuthorize("isAuthenticated()")
+    public Map<String, String> createWalletChallenge(@RequestParam String address) {
+        return userAccountService.createWalletChallenge(address);
     }
 
     @PatchMapping("/me/wallet")

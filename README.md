@@ -216,3 +216,9 @@ src/test/                   # Spring context-loading test
 ```
 
 Write operations belong in transactional services; controllers validate input and delegate. Keep blockchain token IDs as strings in backend models and DTOs. See [AGENTS.md](AGENTS.md) for repository conventions and detailed domain documentation; current source code takes precedence over stale examples in that guide.
+
+### Chain verification and wallet proof
+
+Set `CHAIN_RPC_URL`, `CHAIN_CONTRACT_ADDRESS`, and `CHAIN_ID` (80002 for Polygon Amoy) on the backend; see `.env.example`. The RPC must serve `eth_chainId`, `eth_getTransactionByHash`, `eth_getTransactionReceipt`, `eth_getCode`, and `eth_call` (including contract-creation simulation for undeployed ERC-6492 smart wallets). The backend contract address must match the frontend's `NEXT_PUBLIC_CONTRACT_ADDRESS`. All six ledger writes now verify the confirmed ERC-1155 `TransferSingle` movement and reserve its hash in the database. The reservation and ledger write share one database transaction, so a failed write can be retried with the same confirmed hash.
+
+Wallet linking uses `POST /users/me/wallet/challenge?address=...`, then a signed message submitted to `PATCH /users/me/wallet` as `walletAddress`, `challengeId`, and `signature`. Challenges expire after five minutes and are single use. EOA, deployed ERC-1271, and ERC-6492 smart wallet signatures are accepted. Session versions invalidate access and refresh tokens after password resets or wallet clearing. Existing sessions use the current database role for authorization.

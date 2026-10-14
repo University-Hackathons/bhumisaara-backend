@@ -59,6 +59,7 @@ public class DistributionService {
     private final SackRepository sackRepository;
     private final UserRepository userRepository;
     private final CurrentUserProvider currentUserProvider;
+    private final ChainTransactionVerifier chainVerifier;
 
     /**
      * Approved requests from farmers in the calling officer's own area that
@@ -159,6 +160,10 @@ public class DistributionService {
                             + " (approved " + fertilizerRequest.getApprovedKg() + "kg, already collected "
                             + collectedKg(fertilizerRequest) + "kg)");
         }
+
+        if (!batch.getTokenId().equals(request.getTokenId())) throw new IllegalArgumentException("Batch token mismatch");
+        chainVerifier.verifyBurn(request.getBurnTransactionHash(), officer.getWalletAddress(),
+                batch.getTokenId(), request.getAmountDispensedKg());
 
         // The burn destroyed these tokens, so the batch really does lose volume
         // here — unlike a transfer to an officer, which only moves custody.

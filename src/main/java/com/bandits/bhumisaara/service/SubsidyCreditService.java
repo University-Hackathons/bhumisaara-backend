@@ -52,6 +52,7 @@ public class SubsidyCreditService {
     private final MarketOrderRepository orderRepository;
     private final UserRepository userRepository;
     private final CurrentUserProvider currentUserProvider;
+    private final ChainTransactionVerifier chainVerifier;
 
     /**
      * Seasons an admin may issue against: everything farmers have filed a
@@ -150,6 +151,8 @@ public class SubsidyCreditService {
 
         String tokenId = request.getTokenId().trim();
         requireSeasonTokenIdMatches(season, tokenId);
+
+        chainVerifier.verifyMint(request.getTransactionHash(), admin.getWalletAddress(), farmer.getWalletAddress(), tokenId, request.getCreditsKg());
 
         SubsidyCreditIssuanceEntity saved = issuanceRepository.save(SubsidyCreditIssuanceEntity.builder()
                 .farmerId(farmer.getUserId())

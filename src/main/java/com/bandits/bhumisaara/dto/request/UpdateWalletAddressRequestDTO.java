@@ -18,4 +18,7 @@ public class UpdateWalletAddressRequestDTO {
             regexp = "^0x[a-fA-F0-9]{40}$",
             message = "wallet_address must be a 0x-prefixed 40 character hex address")
     private String walletAddress;
+
+    @NotBlank private String challengeId;
+    @NotBlank private String signature;
 }

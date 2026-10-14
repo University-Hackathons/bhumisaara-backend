@@ -78,6 +78,9 @@ public class MarketOrderEntity {
     @Column(name = "credit_transfer_hash", unique = true)
     private String creditTransferHash;
 
+    @Column(name = "credit_token_id", length = 80)
+    private String creditTokenId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

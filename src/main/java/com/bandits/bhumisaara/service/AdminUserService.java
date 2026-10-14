@@ -192,6 +192,7 @@ public class AdminUserService {
         UserEntity target = requireUser(userId);
 
         target.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        target.setSessionVersion(target.getSessionVersion() + 1);
         UserEntity saved = userRepository.save(target);
 
         auditService.record(actor, AuditService.Action.USER_PASSWORD_RESET, saved.getUserId(), null,
@@ -411,6 +412,7 @@ public class AdminUserService {
 
         String previous = target.getWalletAddress();
         target.setWalletAddress(null);
+        target.setSessionVersion(target.getSessionVersion() + 1);
         UserEntity saved = userRepository.save(target);
 
         // The cleared address is recorded in full: it is a public blockchain

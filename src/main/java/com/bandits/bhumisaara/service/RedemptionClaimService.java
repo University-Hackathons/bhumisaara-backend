@@ -47,6 +47,7 @@ public class RedemptionClaimService {
     private final SubsidyCreditService creditService;
     private final UserRepository userRepository;
     private final CurrentUserProvider currentUserProvider;
+    private final ChainTransactionVerifier chainVerifier;
 
     /** The calling seller's own claims, newest first. */
     @Transactional(readOnly = true)
@@ -167,6 +168,9 @@ public class RedemptionClaimService {
                     "A claim with burn_transaction_hash '" + hash + "' already exists");
         }
 
+        if (!creditService.findAllCreditTokenIds().contains(request.getTokenId()))
+            throw new IllegalArgumentException("Unknown credit token id");
+        chainVerifier.verifyBurn(hash, seller.getWalletAddress(), request.getTokenId(), claim.getCreditsClaimed());
         claim.setBurnTransactionHash(hash);
         claim.setStatus(ClaimStatus.PAID);
 

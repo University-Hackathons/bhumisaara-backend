@@ -19,6 +19,7 @@ public class FertilizerBatchService {
     private final FertilizerBatchRepository batchRepository;
     private final SackService sackService;
     private final CurrentUserProvider currentUserProvider;
+    private final ChainTransactionVerifier chainVerifier;
 
     @Transactional
     public BatchResponseDTO createBatch(BatchRequestDTO request) {
@@ -29,6 +30,9 @@ public class FertilizerBatchService {
                     }
                     throw new IllegalStateException("A batch with transaction_hash '" + request.getTransactionHash() + "' already exists");
                 });
+
+        chainVerifier.verifyMint(request.getTransactionHash(), currentUserProvider.require().getWalletAddress(),
+                currentUserProvider.require().getWalletAddress(), request.getTokenId(), request.getVolumeKg());
 
         FertilizerBatchEntity entity = FertilizerBatchEntity.builder()
                 .tokenId(request.getTokenId())

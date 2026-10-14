@@ -55,6 +55,7 @@ public class JwtService {
     public String generateToken(UserEntity userEntity) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", userEntity.getUserId());
+        claims.put("sessionVersion", userEntity.getSessionVersion());
         claims.put("username", userEntity.getUsername());
         claims.put("email", userEntity.getEmail());
         String role = userEntity.getRole() != null ? userEntity.getRole().getRoleName().name() : null;
@@ -74,7 +75,7 @@ public class JwtService {
     }
 
     public String generateRefreshToken(UserEntity userEntity) {
-        return buildToken(new HashMap<>(), userEntity.getUsername(), refreshExpiration);
+        return buildToken(Map.of("sessionVersion", userEntity.getSessionVersion()), userEntity.getUsername(), refreshExpiration);
     }
 
     private String buildToken(Map<String, Object> extraClaims, String subject, long expiration) {
@@ -89,7 +90,9 @@ public class JwtService {
 
     public boolean isTokenValid(String token, UserDetails userDetails) {
         final String username = extractUsername(token);
-        return username.equals(userDetails.getUsername()) && !isTokenExpired(token);
+        return username.equals(userDetails.getUsername()) && !isTokenExpired(token)
+                && userDetails instanceof UserEntity user
+                && user.getSessionVersion().equals(extractClaim(token, c -> c.get("sessionVersion", Long.class)));
     }
 
     private boolean isTokenExpired(String token) {

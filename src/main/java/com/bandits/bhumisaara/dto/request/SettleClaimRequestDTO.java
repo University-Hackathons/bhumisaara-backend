@@ -21,4 +21,7 @@ public class SettleClaimRequestDTO {
 
     @NotBlank(message = "burn_transaction_hash is required")
     private String burnTransactionHash;
+
+    @NotBlank(message = "token_id is required")
+    private String tokenId;
 }

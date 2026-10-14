@@ -61,6 +61,7 @@ public class MarketOrderService {
     private final SubsidyCreditService creditService;
     private final UserRepository userRepository;
     private final CurrentUserProvider currentUserProvider;
+    private final ChainTransactionVerifier chainVerifier;
 
     /**
      * Prices a proposed order without placing it, so the marketplace can show a
@@ -200,6 +201,13 @@ public class MarketOrderService {
                 throw new IllegalStateException(
                         "An order with credit_transfer_hash '" + hash + "' already exists");
             }
+            if (request.getCreditTokenId() == null || !creditService.findActiveCreditTokenId(farmer.getUserId())
+                    .filter(request.getCreditTokenId()::equals).isPresent())
+                throw new IllegalArgumentException("Credit token id does not match this farmer's active issuance");
+            UserEntity seller = userRepository.findById(order.getSellerId()).orElseThrow();
+            chainVerifier.verifyTransfer(hash, farmer.getWalletAddress(), seller.getWalletAddress(),
+                    request.getCreditTokenId(), order.getCreditsUsed());
+            order.setCreditTokenId(request.getCreditTokenId());
             order.setCreditTransferHash(hash);
         } else if (hash != null && !hash.isEmpty()) {
             throw new IllegalArgumentException(
@@ -442,7 +450,8 @@ public class MarketOrderService {
                 // The token the farmer's wallet transfers from; null once they
                 // have no issuance to draw on.
                 .creditTokenId(order.getCreditsUsed() > 0
-                        ? creditService.findActiveCreditTokenId(order.getFarmerId()).orElse(null)
+                        ? (order.getCreditTokenId() != null ? order.getCreditTokenId()
+                                : creditService.findActiveCreditTokenId(order.getFarmerId()).orElse(null))
                         : null)
                 .tokenType(order.getTokenType())
                 .status(order.getStatus())
