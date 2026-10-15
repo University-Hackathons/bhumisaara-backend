@@ -2,6 +2,7 @@ package com.bandits.bhumisaara.controller;
 
 import com.bandits.bhumisaara.dto.request.ProductListingRequestDTO;
 import com.bandits.bhumisaara.dto.response.ProductListingResponseDTO;
+import com.bandits.bhumisaara.dto.response.PageResponseDTO;
 import com.bandits.bhumisaara.service.ProductListingService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,18 @@ import java.util.List;
 public class ProductListingController {
 
     private final ProductListingService productListingService;
+
+    @GetMapping("/page")
+    @PreAuthorize("isAuthenticated()")
+    public PageResponseDTO<ProductListingResponseDTO> browsePage(
+            @RequestParam(required = false) String fertilizerType,
+            @RequestParam(required = false) Boolean isOrganic,
+            @RequestParam(required = false) Boolean isSubsidyEligible,
+            @RequestParam(required = false) Long sellerId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "24") int size) {
+        return productListingService.browsePage(fertilizerType, isOrganic, isSubsidyEligible, sellerId, page, size);
+    }
 
     /** The marketplace: every ACTIVE listing, open to any signed-in user. */
     @GetMapping

@@ -3,6 +3,8 @@ package com.bandits.bhumisaara.repository;
 import com.bandits.bhumisaara.entity.ProductListingEntity;
 import com.bandits.bhumisaara.enums.ListingStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -12,6 +14,14 @@ import java.util.List;
 
 @Repository
 public interface ProductListingRepository extends JpaRepository<ProductListingEntity, Long> {
+    @Query("select l from ProductListingEntity l where l.status = com.bandits.bhumisaara.enums.ListingStatus.ACTIVE "
+            + "and (:fertilizerType is null or lower(l.fertilizerType) = lower(:fertilizerType)) "
+            + "and (:isOrganic is null or l.isOrganic = :isOrganic) "
+            + "and (:subsidyEligible is null or l.isSubsidyEligible = :subsidyEligible) "
+            + "and (:sellerId is null or l.sellerId = :sellerId)")
+    Page<ProductListingEntity> browse(@Param("fertilizerType") String fertilizerType,
+            @Param("isOrganic") Boolean isOrganic, @Param("subsidyEligible") Boolean subsidyEligible,
+            @Param("sellerId") Long sellerId, Pageable pageable);
 
     List<ProductListingEntity> findBySellerIdOrderByCreatedAtDesc(Long sellerId);
 

@@ -1,10 +1,7 @@
 package com.bandits.bhumisaara.service;
 
 import com.bandits.bhumisaara.dto.response.CreditReconciliationResponseDTO;
-import com.bandits.bhumisaara.entity.MarketOrderEntity;
-import com.bandits.bhumisaara.entity.SubsidyCreditIssuanceEntity;
 import com.bandits.bhumisaara.entity.UserEntity;
-import com.bandits.bhumisaara.enums.OrderStatus;
 import com.bandits.bhumisaara.enums.Role;
 import com.bandits.bhumisaara.repository.MarketOrderRepository;
 import com.bandits.bhumisaara.repository.RedemptionClaimRepository;
@@ -39,10 +36,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class CreditOversightService {
 
-    /** Orders whose credits actually moved. A dispute doesn't put them back. */
-    private static final Set<OrderStatus> SETTLED_STATUSES =
-            Set.of(OrderStatus.COMPLETED, OrderStatus.DISPUTED);
-
     private static final Set<Role> SELLER_ROLES =
             Set.of(Role.PRIVATE_AGRO_DEALER, Role.ORGANIC_FERTILIZER_PRODUCER);
 
@@ -68,31 +61,11 @@ public class CreditOversightService {
     public CreditReconciliationResponseDTO getReconciliation(String season) {
         String normalisedSeason = season == null || season.isBlank() ? null : season.trim();
 
-        List<SubsidyCreditIssuanceEntity> issuances = normalisedSeason == null
-                ? issuanceRepository.findAllByOrderByCreatedAtDesc()
-                : issuanceRepository.findBySeasonOrderByCreatedAtDesc(normalisedSeason);
-
-        int issued = issuances.stream()
-                .mapToInt(SubsidyCreditIssuanceEntity::getCreditsKg)
-                .sum();
-
-        List<MarketOrderEntity> settledOrders = orderRepository.findAllByOrderByCreatedAtDesc().stream()
-                .filter(order -> SETTLED_STATUSES.contains(order.getStatus()))
-                .collect(Collectors.toList());
-
-        // Orders carry no season — a farmer spends from whichever issuance they
-        // hold — so a season-filtered view scopes spending to that season's
-        // farmers rather than pretending orders are seasonal.
-        Set<Long> seasonFarmerIds = issuances.stream()
-                .map(SubsidyCreditIssuanceEntity::getFarmerId)
-                .collect(Collectors.toSet());
-
-        int spent = settledOrders.stream()
-                .filter(order -> normalisedSeason == null || seasonFarmerIds.contains(order.getFarmerId()))
-                .mapToInt(MarketOrderEntity::getCreditsUsed)
-                .sum();
-
-        int redeemed = (int) claimRepository.sumAllRedeemedCredits();
+        int issued = (int) (normalisedSeason == null
+                ? issuanceRepository.sumAllCredits()
+                : issuanceRepository.sumCreditsBySeason(normalisedSeason));
+        int spent = (int) orderRepository.sumCreditsSpentForSeason(normalisedSeason);
+        int redeemed = (int) claimRepository.sumRedeemedForSeason(normalisedSeason);
 
         int heldByFarmers = Math.max(0, issued - spent);
         int heldBySellers = Math.max(0, spent - redeemed);
@@ -102,6 +75,7 @@ public class CreditOversightService {
         return CreditReconciliationResponseDTO.builder()
                 .season(normalisedSeason)
                 .totalIssuedCredits(issued)
+                .spentCredits(spent)
                 .totalRedeemedCredits(redeemed)
                 .creditsHeldBySellers(heldBySellers)
                 .creditsHeldByFarmers(heldByFarmers)
@@ -109,7 +83,7 @@ public class CreditOversightService {
                 .discrepancyCredits(discrepancy)
                 .hasAnomaly(discrepancy != 0)
                 .redemptionRatePct(issued > 0 ? round1((redeemed * 100.0d) / issued) : 0.0d)
-                .sellerStats(buildSellerStats(settledOrders))
+                .sellerStats(buildSellerStats(normalisedSeason))
                 .seasonTotals(buildSeasonTotals())
                 .build();
     }
@@ -123,15 +97,20 @@ public class CreditOversightService {
      * count: a seller who has settled 5 000 credits against three completed
      * orders is either mis-keying claims or acquiring credits off-platform.
      */
-    private List<CreditReconciliationResponseDTO.SellerRedemptionStatsDTO> buildSellerStats(
-            List<MarketOrderEntity> settledOrders) {
-
+    private List<CreditReconciliationResponseDTO.SellerRedemptionStatsDTO> buildSellerStats(String season) {
         Map<Long, Integer> earnedBySeller = new LinkedHashMap<>();
         Map<Long, Long> ordersBySeller = new LinkedHashMap<>();
-
-        settledOrders.forEach(order -> {
-            earnedBySeller.merge(order.getSellerId(), order.getCreditsUsed(), Integer::sum);
-            ordersBySeller.merge(order.getSellerId(), 1L, Long::sum);
+        orderRepository.sellerCreditTotals(season).forEach(row -> {
+            Long sellerId = (Long) row[0];
+            ordersBySeller.put(sellerId, ((Number) row[1]).longValue());
+            earnedBySeller.put(sellerId, ((Number) row[2]).intValue());
+        });
+        Map<Long, Integer> claimedBySeller = new LinkedHashMap<>();
+        Map<Long, Integer> redeemedBySeller = new LinkedHashMap<>();
+        claimRepository.sellerClaimTotals(season).forEach(row -> {
+            Long sellerId = (Long) row[0];
+            claimedBySeller.put(sellerId, ((Number) row[1]).intValue());
+            redeemedBySeller.put(sellerId, ((Number) row[2]).intValue());
         });
 
         List<UserEntity> sellers = new ArrayList<>();
@@ -141,8 +120,8 @@ public class CreditOversightService {
                 .map(seller -> {
                     int earned = earnedBySeller.getOrDefault(seller.getUserId(), 0);
                     long orderCount = ordersBySeller.getOrDefault(seller.getUserId(), 0L);
-                    int claimed = (int) claimRepository.sumOpenOrSettledCreditsBySeller(seller.getUserId());
-                    int redeemed = (int) claimRepository.sumRedeemedCreditsBySeller(seller.getUserId());
+                    int claimed = claimedBySeller.getOrDefault(seller.getUserId(), 0);
+                    int redeemed = redeemedBySeller.getOrDefault(seller.getUserId(), 0);
 
                     // A seller who redeemed anything with no orders behind it is
                     // 100% disproportionate — division by zero would hide that.
@@ -184,29 +163,15 @@ public class CreditOversightService {
         return stats;
     }
 
-    /** Issued totals per season, newest first. */
+    /** Issued totals per season, newest first, calculated in the database. */
     private List<CreditReconciliationResponseDTO.SeasonTotalsDTO> buildSeasonTotals() {
-        Map<String, CreditReconciliationResponseDTO.SeasonTotalsDTO> bySeason = new LinkedHashMap<>();
-
-        issuanceRepository.findAllByOrderByCreatedAtDesc().forEach(issuance -> bySeason.merge(
-                issuance.getSeason(),
+        return issuanceRepository.seasonTotals().stream().map(row ->
                 CreditReconciliationResponseDTO.SeasonTotalsDTO.builder()
-                        .season(issuance.getSeason())
-                        .tokenId(issuance.getTokenId())
-                        .issuedCredits(issuance.getCreditsKg())
-                        .farmerCount(1L)
-                        .build(),
-                (existing, candidate) -> {
-                    existing.setIssuedCredits(existing.getIssuedCredits() + candidate.getIssuedCredits());
-                    existing.setFarmerCount(existing.getFarmerCount() + 1);
-                    return existing;
-                }));
-
-        return bySeason.values().stream()
-                .sorted(Comparator.comparing(
-                        CreditReconciliationResponseDTO.SeasonTotalsDTO::getSeason,
-                        Comparator.reverseOrder()))
-                .collect(Collectors.toList());
+                        .season((String) row[0])
+                        .tokenId((String) row[1])
+                        .issuedCredits(((Number) row[2]).intValue())
+                        .farmerCount(((Number) row[3]).longValue())
+                        .build()).toList();
     }
 
     private double round1(double value) {

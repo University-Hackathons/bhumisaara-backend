@@ -115,7 +115,11 @@ The demo seeder is disabled under the `production` profile. Production roles and
 | `staging` | `.env.staging` | Hibernate `update` | Enabled |
 | `production` | `.env.production` | Hibernate `none` | Disabled |
 
-Production requires an existing database schema. After packaging, a production launch can use:
+Production and staging require an existing base schema. Flyway baselines an existing installation at version 0 and applies the versioned SQL in `src/main/resources/db/migration/` before JPA starts. Take a database backup before the first migrated deployment. New production installations must provision the base schema first because Hibernate schema creation is disabled there. Development uses Hibernate schema updates with Flyway disabled; staging is the place to rehearse migrations against a copy of the existing schema.
+
+The migrations attribute historical orders and claims to a season only when their token and related issuances or earned orders identify exactly one season. Ambiguous older rows remain unattributed, are excluded from seasonal reconciliation, and block further credit commitments for that account until an operator resolves them. New orders and claims always record their actual season and token ID.
+
+After packaging, a production launch can use:
 
 ```bash
 java -jar target/bhumisaara-0.0.1-SNAPSHOT.jar --spring.profiles.active=production
@@ -123,7 +127,9 @@ java -jar target/bhumisaara-0.0.1-SNAPSHOT.jar --spring.profiles.active=producti
 
 Run from the repository root when relying on the relative `.env.production` import. Configure an explicit frontend origin and deployment-specific credentials.
 
-The existing test suite contains a Spring context-loading test. It uses the application's configuration and requires a reachable database; it does not provide comprehensive business-rule coverage.
+Tests use an in-memory H2 database in PostgreSQL mode for the Spring context and concurrent service checks. Production PostgreSQL locking, migration execution, and live RPC calls still require staging verification.
+
+Production and staging use `DB_POOL_MAX` (default 16) and `DB_POOL_MIN` (default 4). The former 100/30 pool had no measured concurrency basis. In a local H2 run, a 3,000-row marketplace query took a median 2.62 ms and returned 3,000 rows; the indexed page took 0.24 ms and returned 24. A 3,000-row claim history took 0.90 ms versus 0.10 ms for a 50-row page. One hundred seller sums took 58.04 ms versus 0.44 ms for one grouped query. These figures establish query shape improvements, not production throughput. Tune the pool against PostgreSQL connection limits, active connections, wait time, and p95 query latency under representative load. The redundant per-connection `SELECT 1` checks were removed; Hikari uses JDBC validation.
 
 ## API and authentication
 
@@ -171,6 +177,7 @@ Passwords are BCrypt-hashed. The JWT filter rechecks account bans on each authen
 - Sacks progress through `AT_CENTRAL`, `WITH_OFFICER`, and `DELIVERED`.
 - Officer transfers change custody without reducing a batch's recorded volume.
 - At farmer collection, the frontend burns stock tokens from the officer's wallet. Recording the handover consumes the sacks, deducts batch volume, and advances the request's collected quantity.
+- Batch `originalVolumeKg` is the import volume; `volumeKg` is remaining stock. The read path derives a missing original volume from remaining stock plus recorded handovers for older development rows. Dashboards accept only registered `STOCK` batch tokens.
 - The collection limit is the request's approved amount minus prior collections. The current handover flow does not depend on the legacy `user_quotas` table.
 - Unique sack-consumption records and transaction hashes help reject duplicate submissions. Disputes flag a handover without reversing it.
 
@@ -181,6 +188,7 @@ Passwords are BCrypt-hashed. The JWT filter rechecks account bans on each authen
 - One credit covers 1 kg chemical or 1.5 kg organic fertilizer. [CreditMath.java](src/main/java/com/bandits/bhumisaara/service/CreditMath.java) calculates conversion using integer arithmetic.
 - The seller's role determines whether a listing is organic. Order totals are calculated by the server.
 - Placing an order reserves stock. Sellers mark goods ready; farmers confirm collection and supply the credit transfer hash. Cash-only confirmations have no transfer hash.
+- Credit orders reserve one season's uncommitted balance while pending; cancellation releases it. Claim limits and reconciliation use that same season and token ID.
 - Sellers submit claims against credits earned from completed orders. Government approval precedes the seller's burn; recording that burn moves an approved claim to `PAID`.
 - Cash amounts and settlement states are recorded; the backend has no payment processor or bank payout integration.
 

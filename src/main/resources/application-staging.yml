@@ -7,10 +7,8 @@ spring:
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: 100
-      minimum-idle: 30
-      connection-init-sql: "SELECT 1"
-      connection-test-query: "SELECT 1"
+      maximum-pool-size: ${DB_POOL_MAX:16}
+      minimum-idle: ${DB_POOL_MIN:4}
 
   jpa:
     hibernate:

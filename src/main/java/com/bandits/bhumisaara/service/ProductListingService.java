@@ -15,6 +15,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import com.bandits.bhumisaara.dto.response.PageResponseDTO;
 
 import java.util.List;
 import java.util.Map;
@@ -36,6 +39,17 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class ProductListingService {
+
+    @Transactional(readOnly = true)
+    public PageResponseDTO<ProductListingResponseDTO> browsePage(String fertilizerType,
+            Boolean isOrganic, Boolean isSubsidyEligible, Long sellerId, int page, int size) {
+        var results = listingRepository.browse(fertilizerType, isOrganic, isSubsidyEligible, sellerId,
+                PageRequest.of(Math.max(0, page), Math.min(100, Math.max(1, size)),
+                        Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "listingId"))));
+        var mapped = mapListings(results.getContent());
+        var iterator = mapped.iterator();
+        return PageResponseDTO.from(results, ignored -> iterator.next());
+    }
 
     /** Orders that still have a claim on reserved stock. */
     private static final Set<OrderStatus> LIVE_ORDER_STATUSES =

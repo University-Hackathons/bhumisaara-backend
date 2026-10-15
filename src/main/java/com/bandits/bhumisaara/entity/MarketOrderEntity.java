@@ -81,6 +81,9 @@ public class MarketOrderEntity {
     @Column(name = "credit_token_id", length = 80)
     private String creditTokenId;
 
+    @Column(name = "season", length = 50)
+    private String season;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

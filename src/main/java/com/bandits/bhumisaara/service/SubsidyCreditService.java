@@ -205,6 +205,20 @@ public class SubsidyCreditService {
                     return existing;
                 }));
 
+        Map<String, long[]> seasonTotals = new LinkedHashMap<>();
+        orderRepository.farmerSeasonCreditTotals(farmer.getUserId()).forEach(row ->
+                seasonTotals.put((String) row[0], new long[] {
+                        ((Number) row[1]).longValue(), ((Number) row[2]).longValue() }));
+        bySeason.values().forEach(entry -> {
+            long[] totals = seasonTotals.getOrDefault(entry.getSeason(), new long[] {0, 0});
+            int seasonSpent = (int) totals[0];
+            entry.setSpentCredits(seasonSpent);
+            entry.setLedgerBalanceCredits(entry.getIssuedCredits() - seasonSpent);
+            int committed = (int) totals[1];
+            entry.setCommittedCredits(committed);
+            entry.setAvailableCredits(Math.max(0, entry.getIssuedCredits() - committed));
+        });
+
         return CreditBalanceResponseDTO.builder()
                 .farmerId(farmer.getUserId())
                 .farmerName(farmer.getUsername())
@@ -233,13 +247,9 @@ public class SubsidyCreditService {
                 .findFirst();
     }
 
-    /** Every credit token id in the system — what a seller could be holding. */
     @Transactional(readOnly = true)
-    public List<String> findAllCreditTokenIds() {
-        return issuanceRepository.findAllByOrderByCreatedAtDesc().stream()
-                .map(SubsidyCreditIssuanceEntity::getTokenId)
-                .distinct()
-                .collect(Collectors.toList());
+    public List<SubsidyCreditIssuanceEntity> issuancesForFarmer(Long farmerId) {
+        return issuanceRepository.findByFarmerIdOrderByCreatedAtDesc(farmerId);
     }
 
     /** Credits a farmer still holds by the ledger's reckoning. */

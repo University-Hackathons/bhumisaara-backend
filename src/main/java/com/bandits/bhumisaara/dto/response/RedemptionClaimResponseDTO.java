@@ -9,7 +9,6 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 /** One seller's redemption claim, as the seller and the reviewing admin see it. */
 @Data
@@ -29,6 +28,8 @@ public class RedemptionClaimResponseDTO {
     private String sellerWallet;
 
     private Integer creditsClaimed;
+    private String season;
+    private String creditTokenId;
     private ClaimStatus status;
     private TokenType tokenType;
     private String burnTransactionHash;
@@ -38,8 +39,6 @@ public class RedemptionClaimResponseDTO {
     /** Credits already committed to other claims that were not rejected. */
     private Integer creditsAlreadyClaimed;
 
-    /** The token ids to check on-chain, so the admin can verify custody. */
-    private List<String> creditTokenIds;
 
     private LocalDateTime submittedAt;
     private LocalDateTime processedAt;

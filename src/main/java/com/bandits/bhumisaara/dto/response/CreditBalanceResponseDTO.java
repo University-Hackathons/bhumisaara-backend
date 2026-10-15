@@ -52,5 +52,9 @@ public class CreditBalanceResponseDTO {
         private String season;
         private String tokenId;
         private Integer issuedCredits;
+        private Integer spentCredits;
+        private Integer ledgerBalanceCredits;
+        private Integer committedCredits;
+        private Integer availableCredits;
     }
 }

@@ -51,6 +51,9 @@ public class FertilizerBatchEntity {
     @Column(name = "volume_kg", nullable = false)
     private Integer volumeKg;
 
+    @Column(name = "original_volume_kg")
+    private Integer originalVolumeKg;
+
     @Column(name = "minted_by_user_id", nullable = false)
     private Long mintedByUserId;
 

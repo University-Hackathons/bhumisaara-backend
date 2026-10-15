@@ -21,6 +21,9 @@ import com.bandits.bhumisaara.security.CurrentUserProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import com.bandits.bhumisaara.dto.response.PageResponseDTO;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -51,9 +54,10 @@ public class BatchTransferService {
      * areas look under-supplied and invite a second delivery.
      */
     private static final Set<RequestStatus> DEMAND_STATUSES =
-            Set.of(RequestStatus.APPROVED, RequestStatus.COLLECTED);
+            Set.of(RequestStatus.APPROVED, RequestStatus.PARTIALLY_COLLECTED, RequestStatus.COLLECTED);
 
     private final BatchTransferRepository transferRepository;
+    private final com.bandits.bhumisaara.repository.DistributionLogRepository distributionLogRepository;
     private final FertilizerRequestRepository requestRepository;
     private final FertilizerBatchRepository batchRepository;
     private final SackRepository sackRepository;
@@ -187,10 +191,41 @@ public class BatchTransferService {
         return response;
     }
 
+    @Transactional(readOnly = true)
+    public com.bandits.bhumisaara.dto.response.StockFlowSummaryDTO getFlowSummary() {
+        Object[] transfers = transferRepository.nationalTotals().get(0);
+        Object[] burns = distributionLogRepository.nationalTotals().get(0);
+        List<Object[]> pairs = transferRepository.custodyPairs();
+        Map<Long, UserEntity> officers = userRepository.findAllById(
+                pairs.stream().map(row -> (Long) row[1]).collect(Collectors.toSet())).stream()
+                .collect(Collectors.toMap(UserEntity::getUserId, user -> user));
+        var custody = pairs.stream().map(row -> {
+            Long officerId = (Long) row[1];
+            UserEntity officer = officers.get(officerId);
+            return new com.bandits.bhumisaara.dto.response.StockFlowSummaryDTO.Custody(
+                    (String) row[0], officerId, officer != null ? officer.getUsername() : null);
+        }).toList();
+        return new com.bandits.bhumisaara.dto.response.StockFlowSummaryDTO(
+                ((Number) transfers[0]).longValue(), ((Number) transfers[1]).longValue(),
+                ((Number) burns[0]).longValue(), ((Number) burns[1]).longValue(), custody);
+    }
+
     /** Admin transfer history, newest first. */
     @Transactional(readOnly = true)
     public List<TransferResponseDTO> getAllTransfers() {
-        List<BatchTransferEntity> transfers = transferRepository.findAllByOrderByCreatedAtDesc();
+        return mapTransfers(transferRepository.findAllByOrderByCreatedAtDesc());
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponseDTO<TransferResponseDTO> getTransferPage(int page, int size) {
+        var transfers = transferRepository.findStockTransfers(PageRequest.of(Math.max(0, page),
+                Math.min(100, Math.max(1, size)), Sort.by(Sort.Direction.DESC, "createdAt")
+                        .and(Sort.by(Sort.Direction.DESC, "transferId"))));
+        var mapped = mapTransfers(transfers.getContent()).iterator();
+        return PageResponseDTO.from(transfers, ignored -> mapped.next());
+    }
+
+    private List<TransferResponseDTO> mapTransfers(List<BatchTransferEntity> transfers) {
 
         if (transfers.isEmpty()) {
             return List.of();

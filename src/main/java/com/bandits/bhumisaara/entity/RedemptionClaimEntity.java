@@ -38,6 +38,12 @@ public class RedemptionClaimEntity {
     @Column(name = "credits_claimed", nullable = false)
     private Integer creditsClaimed;
 
+    @Column(name = "season", length = 50)
+    private String season;
+
+    @Column(name = "credit_token_id", length = 80)
+    private String creditTokenId;
+
     @Builder.Default
     @ColumnDefault("'SUBMITTED'")
     @Enumerated(EnumType.STRING)

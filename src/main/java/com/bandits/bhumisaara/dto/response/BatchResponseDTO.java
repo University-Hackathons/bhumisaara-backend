@@ -22,6 +22,7 @@ public class BatchResponseDTO {
     private String importerName;
     private String fertilizerType;
     private Integer volumeKg;
+    private Integer originalVolumeKg;
     private Long mintedByUserId;
     private LocalDateTime createdAt;
 }

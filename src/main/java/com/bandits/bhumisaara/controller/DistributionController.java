@@ -3,6 +3,7 @@ package com.bandits.bhumisaara.controller;
 import com.bandits.bhumisaara.dto.request.HandoverRequestDTO;
 import com.bandits.bhumisaara.dto.request.SackValidationRequestDTO;
 import com.bandits.bhumisaara.dto.response.DistributionResponseDTO;
+import com.bandits.bhumisaara.dto.response.PageResponseDTO;
 import com.bandits.bhumisaara.dto.response.PendingCollectionResponseDTO;
 import com.bandits.bhumisaara.dto.response.SackValidationResponseDTO;
 import com.bandits.bhumisaara.service.DistributionService;
@@ -22,6 +23,33 @@ import java.util.List;
 public class DistributionController {
 
     private final DistributionService distributionService;
+
+    @GetMapping("/officer/stats")
+    @PreAuthorize("hasRole('AGRARIAN_SERVICE_OFFICER')")
+    public com.bandits.bhumisaara.dto.response.DistributionStatsDTO officerStats() {
+        return distributionService.getOfficerStats();
+    }
+
+    @GetMapping("/officer/page")
+    @PreAuthorize("hasRole('AGRARIAN_SERVICE_OFFICER')")
+    public PageResponseDTO<DistributionResponseDTO> officerPage(@RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return distributionService.getHistoryPage("officer", page, size);
+    }
+
+    @GetMapping("/farmer/page")
+    @PreAuthorize("hasRole('FARMER')")
+    public PageResponseDTO<DistributionResponseDTO> farmerPage(@RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return distributionService.getHistoryPage("farmer", page, size);
+    }
+
+    @GetMapping("/page")
+    @PreAuthorize("hasAnyRole('GOVERNMENT_ADMIN', 'SYSTEM_ADMIN')")
+    public PageResponseDTO<DistributionResponseDTO> allPage(@RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return distributionService.getHistoryPage("all", page, size);
+    }
 
     /** The officer's collection queue for their own area. */
     @GetMapping("/pending")

@@ -4,6 +4,10 @@ import com.bandits.bhumisaara.entity.UserEntity;
 import com.bandits.bhumisaara.enums.Role;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import jakarta.persistence.LockModeType;
 
 import java.util.List;
 import java.util.Optional;
@@ -13,6 +17,9 @@ import java.util.Optional;
  * filters (role, area, banned, search) are each independently optional.
  */
 public interface UserRepository extends JpaRepository<UserEntity, Long>, JpaSpecificationExecutor<UserEntity> {
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select u from UserEntity u where u.userId = :id")
+    Optional<UserEntity> findByIdForUpdate(@Param("id") Long id);
     Optional<UserEntity> findByUsername(String username);
 
     Optional<UserEntity> findByEmail(String email);

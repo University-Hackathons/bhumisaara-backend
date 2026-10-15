@@ -3,6 +3,7 @@ package com.bandits.bhumisaara.repository;
 import com.bandits.bhumisaara.entity.FertilizerRequestEntity;
 import com.bandits.bhumisaara.enums.RequestStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -10,9 +11,14 @@ import org.springframework.stereotype.Repository;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
+import jakarta.persistence.LockModeType;
 
 @Repository
 public interface FertilizerRequestRepository extends JpaRepository<FertilizerRequestEntity, Long> {
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from FertilizerRequestEntity r where r.requestId = :id")
+    Optional<FertilizerRequestEntity> findByIdForUpdate(@Param("id") Long id);
 
     List<FertilizerRequestEntity> findByFarmer_UserIdOrderByCreatedAtDesc(Long farmerId);
 

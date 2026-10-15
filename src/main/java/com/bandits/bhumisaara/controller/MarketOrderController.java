@@ -3,6 +3,7 @@ package com.bandits.bhumisaara.controller;
 import com.bandits.bhumisaara.dto.request.ConfirmOrderRequestDTO;
 import com.bandits.bhumisaara.dto.request.PlaceOrderRequestDTO;
 import com.bandits.bhumisaara.dto.response.MarketOrderResponseDTO;
+import com.bandits.bhumisaara.dto.response.PageResponseDTO;
 import com.bandits.bhumisaara.dto.response.OrderQuoteResponseDTO;
 import com.bandits.bhumisaara.service.MarketOrderService;
 import jakarta.validation.Valid;
@@ -29,6 +30,33 @@ import java.util.List;
 public class MarketOrderController {
 
     private final MarketOrderService marketOrderService;
+
+    @GetMapping("/me/page")
+    @PreAuthorize("hasRole('FARMER')")
+    public PageResponseDTO<MarketOrderResponseDTO> myPage(@RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return marketOrderService.getOrderPage("me", page, size);
+    }
+
+    @GetMapping("/seller/page")
+    @PreAuthorize("hasAnyRole('PRIVATE_AGRO_DEALER', 'ORGANIC_FERTILIZER_PRODUCER')")
+    public PageResponseDTO<MarketOrderResponseDTO> sellerPage(@RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return marketOrderService.getOrderPage("seller", page, size);
+    }
+
+    @GetMapping("/page")
+    @PreAuthorize("hasAnyRole('GOVERNMENT_ADMIN', 'SYSTEM_ADMIN')")
+    public PageResponseDTO<MarketOrderResponseDTO> allPage(@RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return marketOrderService.getOrderPage("all", page, size);
+    }
+
+    @GetMapping("/seller/stats")
+    @PreAuthorize("hasAnyRole('PRIVATE_AGRO_DEALER', 'ORGANIC_FERTILIZER_PRODUCER')")
+    public com.bandits.bhumisaara.dto.response.SellerOrderStatsDTO sellerStats() {
+        return marketOrderService.getSellerStats();
+    }
 
     /** Prices a proposed order server-side, so the live breakdown can be trusted. */
     @GetMapping("/quote")

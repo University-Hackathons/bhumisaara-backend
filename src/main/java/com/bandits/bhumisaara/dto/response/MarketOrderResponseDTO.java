@@ -40,6 +40,7 @@ public class MarketOrderResponseDTO {
 
     /** The credit token the transfer moves, resolved from the farmer's issuances. */
     private String creditTokenId;
+    private String season;
     private TokenType tokenType;
 
     private OrderStatus status;

@@ -25,6 +25,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import com.bandits.bhumisaara.dto.response.PageResponseDTO;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -47,6 +51,25 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class DistributionService {
+    @Transactional(readOnly = true)
+    public com.bandits.bhumisaara.dto.response.DistributionStatsDTO getOfficerStats() {
+        Object[] row = distributionLogRepository.officerTotals(currentUserProvider.require().getUserId()).get(0);
+        return new com.bandits.bhumisaara.dto.response.DistributionStatsDTO(
+                ((Number) row[0]).longValue(), ((Number) row[1]).longValue(),
+                ((Number) row[2]).longValue());
+    }
+    @Transactional(readOnly = true)
+    public PageResponseDTO<DistributionResponseDTO> getHistoryPage(String scope, int page, int size) {
+        var pageable = PageRequest.of(Math.max(0, page), Math.min(100, Math.max(1, size)),
+                Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "distributionId")));
+        Page<DistributionLogEntity> logs = switch (scope) {
+            case "officer" -> distributionLogRepository.findStockByOfficerId(currentUserProvider.require().getUserId(), pageable);
+            case "farmer" -> distributionLogRepository.findStockByFarmerId(currentUserProvider.require().getUserId(), pageable);
+            default -> distributionLogRepository.findStock(pageable);
+        };
+        var mapped = mapHistory(logs.getContent()).iterator();
+        return PageResponseDTO.from(logs, ignored -> mapped.next());
+    }
 
     /** A partially collected request is still owed the rest, so it stays in the queue. */
     private static final Set<RequestStatus> COLLECTABLE_STATUSES =
@@ -90,7 +113,7 @@ public class DistributionService {
         UserEntity officer = currentUserProvider.require();
         AreaEntity area = requireOfficerArea(officer);
 
-        FertilizerRequestEntity fertilizerRequest = requireCollectableRequest(request.getRequestId(), area);
+        FertilizerRequestEntity fertilizerRequest = requireCollectableRequest(request.getRequestId(), area, false);
         SackEntity sack = requireDispensableSack(request.getSackSerial(), officer);
 
         int alreadyScannedKg = request.getAlreadyScannedKg() == null ? 0 : request.getAlreadyScannedKg();
@@ -123,7 +146,7 @@ public class DistributionService {
                             + "' already exists");
         }
 
-        FertilizerRequestEntity fertilizerRequest = requireCollectableRequest(request.getRequestId(), area);
+        FertilizerRequestEntity fertilizerRequest = requireCollectableRequest(request.getRequestId(), area, true);
         UserEntity farmer = fertilizerRequest.getFarmer();
 
         String storedWallet = farmer.getWalletAddress();
@@ -284,8 +307,8 @@ public class DistributionService {
      * Loads a request the officer is actually allowed to serve: theirs to serve,
      * still owed stock, and belonging to a farmer in their own area.
      */
-    private FertilizerRequestEntity requireCollectableRequest(Long requestId, AreaEntity officerArea) {
-        FertilizerRequestEntity request = requestRepository.findById(requestId)
+    private FertilizerRequestEntity requireCollectableRequest(Long requestId, AreaEntity officerArea, boolean forUpdate) {
+        FertilizerRequestEntity request = (forUpdate ? requestRepository.findByIdForUpdate(requestId) : requestRepository.findById(requestId))
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Fertilizer request not found with id: " + requestId));
 

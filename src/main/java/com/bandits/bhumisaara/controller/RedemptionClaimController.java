@@ -4,6 +4,7 @@ import com.bandits.bhumisaara.dto.request.ReviewClaimRequestDTO;
 import com.bandits.bhumisaara.dto.request.SettleClaimRequestDTO;
 import com.bandits.bhumisaara.dto.request.SubmitClaimRequestDTO;
 import com.bandits.bhumisaara.dto.response.RedemptionClaimResponseDTO;
+import com.bandits.bhumisaara.dto.response.PageResponseDTO;
 import com.bandits.bhumisaara.service.RedemptionClaimService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,33 @@ import java.util.List;
 public class RedemptionClaimController {
 
     private final RedemptionClaimService redemptionClaimService;
+
+    @GetMapping("/me/page")
+    @PreAuthorize("hasAnyRole('PRIVATE_AGRO_DEALER', 'ORGANIC_FERTILIZER_PRODUCER')")
+    public PageResponseDTO<RedemptionClaimResponseDTO> myPage(@RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return redemptionClaimService.getClaimPage("me", page, size);
+    }
+
+    @GetMapping("/pending/page")
+    @PreAuthorize("hasAnyRole('GOVERNMENT_ADMIN', 'SYSTEM_ADMIN')")
+    public PageResponseDTO<RedemptionClaimResponseDTO> pendingPage(@RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return redemptionClaimService.getClaimPage("pending", page, size);
+    }
+
+    @GetMapping("/page")
+    @PreAuthorize("hasAnyRole('GOVERNMENT_ADMIN', 'SYSTEM_ADMIN')")
+    public PageResponseDTO<RedemptionClaimResponseDTO> allPage(@RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return redemptionClaimService.getClaimPage("all", page, size);
+    }
+
+    @GetMapping("/available")
+    @PreAuthorize("hasAnyRole('PRIVATE_AGRO_DEALER', 'ORGANIC_FERTILIZER_PRODUCER')")
+    public List<com.bandits.bhumisaara.dto.response.SellerSeasonCreditsDTO> available() {
+        return redemptionClaimService.getAvailableBySeason();
+    }
 
     /** A seller filing a claim, bounded by what their completed orders earned. */
     @PostMapping

@@ -1,4 +1,6 @@
 spring:
+  flyway:
+    enabled: false
   config:
     import: optional:file:./.env.development[.properties]
   datasource:

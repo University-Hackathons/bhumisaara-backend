@@ -17,6 +17,7 @@ import java.util.stream.Collectors;
 public class FertilizerBatchService {
 
     private final FertilizerBatchRepository batchRepository;
+    private final com.bandits.bhumisaara.repository.DistributionLogRepository distributionLogRepository;
     private final SackService sackService;
     private final CurrentUserProvider currentUserProvider;
     private final ChainTransactionVerifier chainVerifier;
@@ -40,6 +41,7 @@ public class FertilizerBatchService {
                 .importerName(request.getImporterName())
                 .fertilizerType(request.getFertilizerType())
                 .volumeKg(request.getVolumeKg())
+                .originalVolumeKg(request.getVolumeKg())
                 // From the JWT, never the payload — this id also becomes the
                 // initial custodian of every sack in the batch.
                 .mintedByUserId(currentUserProvider.require().getUserId())
@@ -57,8 +59,11 @@ public class FertilizerBatchService {
 
     @Transactional(readOnly = true)
     public List<BatchResponseDTO> getAllBatches() {
-        return batchRepository.findAll().stream()
-                .map(this::mapToDTO)
+        java.util.Map<Long, Long> distributed = new java.util.HashMap<>();
+        distributionLogRepository.distributedKgByBatch().forEach(row ->
+                distributed.put((Long) row[0], ((Number) row[1]).longValue()));
+        return batchRepository.findByTokenType(com.bandits.bhumisaara.enums.TokenType.STOCK).stream()
+                .map(entity -> mapToDTO(entity, distributed.getOrDefault(entity.getBatchId(), 0L)))
                 .collect(Collectors.toList());
     }
 
@@ -77,6 +82,12 @@ public class FertilizerBatchService {
     }
 
     private BatchResponseDTO mapToDTO(FertilizerBatchEntity entity) {
+        long distributed = entity.getOriginalVolumeKg() == null
+                ? distributionLogRepository.distributedKgForBatch(entity.getBatchId()) : 0;
+        return mapToDTO(entity, distributed);
+    }
+
+    private BatchResponseDTO mapToDTO(FertilizerBatchEntity entity, long distributed) {
         return BatchResponseDTO.builder()
                 .batchId(entity.getBatchId())
                 .tokenId(entity.getTokenId())
@@ -85,6 +96,8 @@ public class FertilizerBatchService {
                 .importerName(entity.getImporterName())
                 .fertilizerType(entity.getFertilizerType())
                 .volumeKg(entity.getVolumeKg())
+                .originalVolumeKg(entity.getOriginalVolumeKg() != null
+                        ? entity.getOriginalVolumeKg() : Math.toIntExact(entity.getVolumeKg() + distributed))
                 .mintedByUserId(entity.getMintedByUserId())
                 .createdAt(entity.getCreatedAt())
                 .build();

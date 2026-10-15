@@ -16,6 +16,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import com.bandits.bhumisaara.dto.response.PageResponseDTO;
 
 import java.time.LocalDateTime;
 import java.util.HashSet;
@@ -41,13 +45,45 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class RedemptionClaimService {
+    @Transactional(readOnly = true)
+    public PageResponseDTO<RedemptionClaimResponseDTO> getClaimPage(String scope, int page, int size) {
+        var sort = "pending".equals(scope)
+                ? Sort.by(Sort.Direction.ASC, "submittedAt")
+                : Sort.by(Sort.Direction.DESC, "submittedAt");
+        var pageable = PageRequest.of(Math.max(0, page), Math.min(100, Math.max(1, size)), sort);
+        Page<RedemptionClaimEntity> claims = switch (scope) {
+            case "me" -> claimRepository.findBySellerId(requireSeller().getUserId(), pageable);
+            case "pending" -> claimRepository.findByStatusIn(List.of(ClaimStatus.SUBMITTED, ClaimStatus.APPROVED), pageable);
+            default -> claimRepository.findAll(pageable);
+        };
+        var mapped = mapClaims(claims.getContent()).iterator();
+        return PageResponseDTO.from(claims, ignored -> mapped.next());
+    }
 
     private final RedemptionClaimRepository claimRepository;
+    private final com.bandits.bhumisaara.repository.SubsidyCreditIssuanceRepository issuanceRepository;
     private final MarketOrderRepository orderRepository;
-    private final SubsidyCreditService creditService;
     private final UserRepository userRepository;
     private final CurrentUserProvider currentUserProvider;
     private final ChainTransactionVerifier chainVerifier;
+
+    @Transactional(readOnly = true)
+    public List<com.bandits.bhumisaara.dto.response.SellerSeasonCreditsDTO> getAvailableBySeason() {
+        Long sellerId = requireSeller().getUserId();
+        Map<String, long[]> claimed = new java.util.HashMap<>();
+        claimRepository.sellerSeasonClaimed(sellerId).forEach(row ->
+                claimed.put((String) row[0], new long[] {
+                        ((Number) row[1]).longValue(), ((Number) row[2]).longValue() }));
+        return orderRepository.sellerSeasonCredits(sellerId).stream().map(row -> {
+            String season = (String) row[0];
+            long earned = ((Number) row[2]).longValue();
+            long[] totals = claimed.getOrDefault(season, new long[] {0, 0});
+            long used = totals[0];
+            return new com.bandits.bhumisaara.dto.response.SellerSeasonCreditsDTO(
+                    season, (String) row[1], earned, used, totals[1], Math.max(0, earned - used));
+        }).sorted(java.util.Comparator.comparing(
+                com.bandits.bhumisaara.dto.response.SellerSeasonCreditsDTO::season).reversed()).toList();
+    }
 
     /** The calling seller's own claims, newest first. */
     @Transactional(readOnly = true)
@@ -83,9 +119,15 @@ public class RedemptionClaimService {
     @Transactional
     public RedemptionClaimResponseDTO submitClaim(SubmitClaimRequestDTO request) {
         UserEntity seller = requireSeller();
-
-        int earned = (int) orderRepository.sumCreditsEarnedBySeller(seller.getUserId());
-        int alreadyClaimed = (int) claimRepository.sumOpenOrSettledCreditsBySeller(seller.getUserId());
+        seller = userRepository.findByIdForUpdate(seller.getUserId()).orElseThrow();
+        if (claimRepository.countUnattributedClaims(seller.getUserId()) > 0) {
+            throw new IllegalStateException("Older claims need a verified season before another claim can be submitted");
+        }
+        String season = request.getSeason().trim();
+        var issuance = issuanceRepository.findFirstBySeasonOrderByCreatedAtAsc(season)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown credit season: " + season));
+        int earned = (int) orderRepository.sumCreditsEarnedBySellerAndSeason(seller.getUserId(), season);
+        int alreadyClaimed = (int) claimRepository.sumCommittedBySellerAndSeason(seller.getUserId(), season);
         int claimable = earned - alreadyClaimed;
 
         if (claimable <= 0) {
@@ -109,6 +151,8 @@ public class RedemptionClaimService {
         RedemptionClaimEntity saved = claimRepository.save(RedemptionClaimEntity.builder()
                 .sellerId(seller.getUserId())
                 .creditsClaimed(request.getCreditsClaimed())
+                .season(season)
+                .creditTokenId(issuance.getTokenId())
                 .status(ClaimStatus.SUBMITTED)
                 .build());
 
@@ -122,7 +166,7 @@ public class RedemptionClaimService {
     @Transactional
     public RedemptionClaimResponseDTO reviewClaim(Long claimId, ReviewClaimRequestDTO request) {
         UserEntity admin = currentUserProvider.require();
-        RedemptionClaimEntity claim = requireClaim(claimId);
+        RedemptionClaimEntity claim = requireClaimForUpdate(claimId);
 
         if (claim.getStatus() != ClaimStatus.SUBMITTED) {
             throw new IllegalStateException(
@@ -151,7 +195,7 @@ public class RedemptionClaimService {
     @Transactional
     public RedemptionClaimResponseDTO settleClaim(Long claimId, SettleClaimRequestDTO request) {
         UserEntity seller = requireSeller();
-        RedemptionClaimEntity claim = requireClaim(claimId);
+        RedemptionClaimEntity claim = requireClaimForUpdate(claimId);
 
         if (!claim.getSellerId().equals(seller.getUserId())) {
             throw new AccessDeniedException("Claim " + claimId + " does not belong to you");
@@ -168,8 +212,8 @@ public class RedemptionClaimService {
                     "A claim with burn_transaction_hash '" + hash + "' already exists");
         }
 
-        if (!creditService.findAllCreditTokenIds().contains(request.getTokenId()))
-            throw new IllegalArgumentException("Unknown credit token id");
+        if (!request.getTokenId().equals(claim.getCreditTokenId()))
+            throw new IllegalArgumentException("Credit token id does not match this claim's season");
         chainVerifier.verifyBurn(hash, seller.getWalletAddress(), request.getTokenId(), claim.getCreditsClaimed());
         claim.setBurnTransactionHash(hash);
         claim.setStatus(ClaimStatus.PAID);
@@ -190,6 +234,11 @@ public class RedemptionClaimService {
         return user;
     }
 
+    private RedemptionClaimEntity requireClaimForUpdate(Long claimId) {
+        return claimRepository.findByIdForUpdate(claimId)
+                .orElseThrow(() -> new IllegalArgumentException("Redemption claim not found with id: " + claimId));
+    }
+
     private RedemptionClaimEntity requireClaim(Long claimId) {
         return claimRepository.findById(claimId)
                 .orElseThrow(() -> new IllegalArgumentException(
@@ -203,9 +252,8 @@ public class RedemptionClaimService {
     /**
      * Loads the seller names, wallets and earned totals a queue needs in bulk.
      * <p>
-     * The credit token ids travel with every row so the admin's queue can read
-     * {@code balanceOf} against the seller's wallet and see for itself that the
-     * credits being claimed are really there.
+     * Each row carries the exact seasonal credit token for the admin's
+     * {@code balanceOf} check against the seller's wallet.
      */
     private List<RedemptionClaimResponseDTO> mapClaims(List<RedemptionClaimEntity> claims) {
         if (claims.isEmpty()) {
@@ -223,7 +271,12 @@ public class RedemptionClaimService {
         Map<Long, UserEntity> users = userRepository.findAllById(userIds).stream()
                 .collect(Collectors.toMap(UserEntity::getUserId, user -> user));
 
-        List<String> creditTokenIds = creditService.findAllCreditTokenIds();
+        Map<Long, Integer> earnedBySeller = new java.util.HashMap<>();
+        orderRepository.sellerCreditTotals(null).forEach(row ->
+                earnedBySeller.put((Long) row[0], ((Number) row[2]).intValue()));
+        Map<Long, Integer> claimedBySeller = new java.util.HashMap<>();
+        claimRepository.sellerClaimTotals(null).forEach(row ->
+                claimedBySeller.put((Long) row[0], ((Number) row[1]).intValue()));
 
         return claims.stream()
                 .map(claim -> {
@@ -241,14 +294,15 @@ public class RedemptionClaimService {
                                     : null)
                             .sellerWallet(seller != null ? seller.getWalletAddress() : null)
                             .creditsClaimed(claim.getCreditsClaimed())
+                            .season(claim.getSeason())
+                            .creditTokenId(claim.getCreditTokenId())
                             .status(claim.getStatus())
                             .tokenType(claim.getTokenType())
                             .burnTransactionHash(claim.getBurnTransactionHash())
                             .creditsEarnedFromOrders(
-                                    (int) orderRepository.sumCreditsEarnedBySeller(claim.getSellerId()))
+                                    earnedBySeller.getOrDefault(claim.getSellerId(), 0))
                             .creditsAlreadyClaimed(
-                                    (int) claimRepository.sumOpenOrSettledCreditsBySeller(claim.getSellerId()))
-                            .creditTokenIds(creditTokenIds)
+                                    claimedBySeller.getOrDefault(claim.getSellerId(), 0))
                             .submittedAt(claim.getSubmittedAt())
                             .processedAt(claim.getProcessedAt())
                             .processedByUserId(claim.getProcessedByUserId())

@@ -33,6 +33,10 @@ public interface SubsidyCreditIssuanceRepository extends JpaRepository<SubsidyCr
     @Query("SELECT DISTINCT i.season FROM SubsidyCreditIssuanceEntity i ORDER BY i.season DESC")
     List<String> findDistinctSeasons();
 
+    @Query("select i.season, i.tokenId, sum(i.creditsKg), count(i) "
+            + "from SubsidyCreditIssuanceEntity i group by i.season, i.tokenId order by i.season desc")
+    List<Object[]> seasonTotals();
+
     @Query("SELECT COALESCE(SUM(i.creditsKg), 0) FROM SubsidyCreditIssuanceEntity i")
     long sumAllCredits();
 

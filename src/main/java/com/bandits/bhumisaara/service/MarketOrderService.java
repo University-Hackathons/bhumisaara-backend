@@ -18,6 +18,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import com.bandits.bhumisaara.dto.response.PageResponseDTO;
 
 import java.time.LocalDateTime;
 import java.util.HashSet;
@@ -50,6 +54,18 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class MarketOrderService {
+    @Transactional(readOnly = true)
+    public PageResponseDTO<MarketOrderResponseDTO> getOrderPage(String scope, int page, int size) {
+        var pageable = PageRequest.of(Math.max(0, page), Math.min(100, Math.max(1, size)),
+                Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "orderId")));
+        Page<MarketOrderEntity> orders = switch (scope) {
+            case "me" -> orderRepository.findByFarmerId(currentUserProvider.require().getUserId(), pageable);
+            case "seller" -> orderRepository.findBySellerId(currentUserProvider.require().getUserId(), pageable);
+            default -> orderRepository.findAll(pageable);
+        };
+        var mapped = mapOrders(orders.getContent()).iterator();
+        return PageResponseDTO.from(orders, ignored -> mapped.next());
+    }
 
     /** Statuses a farmer or seller may still walk back from. */
     private static final Set<OrderStatus> CANCELLABLE_STATUSES =
@@ -101,8 +117,14 @@ public class MarketOrderService {
         // Re-derived from the listing, never taken from the client.
         OrderQuoteResponseDTO quote = buildQuote(listing, quantityKg, creditsUsed);
 
+        String orderSeason = null;
+        String orderCreditTokenId = null;
         if (creditsUsed > 0) {
-            requireCreditsAreSpendable(farmer, listing, creditsUsed);
+            // Every order for this farmer serializes here, including the balance check.
+            farmer = userRepository.findByIdForUpdate(farmer.getUserId()).orElseThrow();
+            var issuance = requireCreditsAreSpendable(farmer, listing, creditsUsed);
+            orderSeason = issuance.getSeason();
+            orderCreditTokenId = issuance.getTokenId();
         }
 
         UserEntity seller = userRepository.findById(listing.getSellerId())
@@ -133,6 +155,8 @@ public class MarketOrderService {
                 .sellerId(listing.getSellerId())
                 .quantityKg(quantityKg)
                 .creditsUsed(creditsUsed)
+                .season(orderSeason)
+                .creditTokenId(orderCreditTokenId)
                 .cashAmountLkr(quote.getCashAmountLkr())
                 .status(OrderStatus.PENDING_CONFIRMATION)
                 .build());
@@ -147,7 +171,7 @@ public class MarketOrderService {
     @Transactional
     public MarketOrderResponseDTO markReady(Long orderId) {
         UserEntity seller = currentUserProvider.require();
-        MarketOrderEntity order = requireOrder(orderId);
+        MarketOrderEntity order = requireOrderForUpdate(orderId);
 
         if (!order.getSellerId().equals(seller.getUserId())) {
             throw new AccessDeniedException("Order " + orderId + " was not placed with you");
@@ -175,7 +199,7 @@ public class MarketOrderService {
     @Transactional
     public MarketOrderResponseDTO confirmOrder(Long orderId, ConfirmOrderRequestDTO request) {
         UserEntity farmer = currentUserProvider.require();
-        MarketOrderEntity order = requireOrder(orderId);
+        MarketOrderEntity order = requireOrderForUpdate(orderId);
 
         if (!order.getFarmerId().equals(farmer.getUserId())) {
             throw new AccessDeniedException("Order " + orderId + " does not belong to you");
@@ -201,9 +225,8 @@ public class MarketOrderService {
                 throw new IllegalStateException(
                         "An order with credit_transfer_hash '" + hash + "' already exists");
             }
-            if (request.getCreditTokenId() == null || !creditService.findActiveCreditTokenId(farmer.getUserId())
-                    .filter(request.getCreditTokenId()::equals).isPresent())
-                throw new IllegalArgumentException("Credit token id does not match this farmer's active issuance");
+            if (request.getCreditTokenId() == null || !request.getCreditTokenId().equals(order.getCreditTokenId()))
+                throw new IllegalArgumentException("Credit token id does not match the season reserved for this order");
             UserEntity seller = userRepository.findById(order.getSellerId()).orElseThrow();
             chainVerifier.verifyTransfer(hash, farmer.getWalletAddress(), seller.getWalletAddress(),
                     request.getCreditTokenId(), order.getCreditsUsed());
@@ -230,7 +253,7 @@ public class MarketOrderService {
     @Transactional
     public MarketOrderResponseDTO cancelOrder(Long orderId) {
         UserEntity actor = currentUserProvider.require();
-        MarketOrderEntity order = requireOrder(orderId);
+        MarketOrderEntity order = requireOrderForUpdate(orderId);
 
         boolean isParty = order.getFarmerId().equals(actor.getUserId())
                 || order.getSellerId().equals(actor.getUserId());
@@ -268,7 +291,7 @@ public class MarketOrderService {
     @Transactional
     public MarketOrderResponseDTO disputeOrder(Long orderId) {
         UserEntity farmer = currentUserProvider.require();
-        MarketOrderEntity order = requireOrder(orderId);
+        MarketOrderEntity order = requireOrderForUpdate(orderId);
 
         if (!order.getFarmerId().equals(farmer.getUserId())) {
             throw new AccessDeniedException("Order " + orderId + " does not belong to you");
@@ -287,6 +310,14 @@ public class MarketOrderService {
         order.setDisputedAt(LocalDateTime.now());
 
         return mapSingle(orderRepository.save(order));
+    }
+
+    @Transactional(readOnly = true)
+    public com.bandits.bhumisaara.dto.response.SellerOrderStatsDTO getSellerStats() {
+        Object[] row = orderRepository.sellerDashboardTotals(currentUserProvider.require().getUserId()).get(0);
+        return new com.bandits.bhumisaara.dto.response.SellerOrderStatsDTO(
+                ((Number) row[0]).longValue(), ((Number) row[1]).longValue(),
+                ((Number) row[2]).longValue(), ((Number) row[3]).longValue());
     }
 
     /** The calling farmer's own orders, newest first. */
@@ -338,22 +369,20 @@ public class MarketOrderService {
      * All three are checked server-side: the browser disables the button, but
      * nothing stops a client posting straight to the endpoint.
      */
-    private void requireCreditsAreSpendable(UserEntity farmer, ProductListingEntity listing, int creditsUsed) {
+    private com.bandits.bhumisaara.entity.SubsidyCreditIssuanceEntity requireCreditsAreSpendable(
+            UserEntity farmer, ProductListingEntity listing, int creditsUsed) {
         if (!Boolean.TRUE.equals(listing.getIsSubsidyEligible())) {
-            throw new IllegalArgumentException(
-                    "Listing " + listing.getListingId() + " does not accept subsidy credits");
+            throw new IllegalArgumentException("Listing " + listing.getListingId() + " does not accept subsidy credits");
         }
-
-        if (creditService.findActiveCreditTokenId(farmer.getUserId()).isEmpty()) {
-            throw new IllegalStateException(
-                    "You have not been issued subsidy credits yet, so none can be spent");
+        if (orderRepository.countUnattributedCreditOrders(farmer.getUserId()) > 0) {
+            throw new IllegalStateException("Older credit orders need a verified season before more credits can be reserved");
         }
-
-        int available = creditService.ledgerBalanceForFarmer(farmer.getUserId());
-        if (creditsUsed > available) {
-            throw new IllegalArgumentException(
-                    "Spending " + creditsUsed + " credits would exceed your balance of " + available);
+        for (var issuance : creditService.issuancesForFarmer(farmer.getUserId())) {
+            long committed = orderRepository.sumCommittedCreditsByFarmerAndSeason(
+                    farmer.getUserId(), issuance.getSeason());
+            if (issuance.getCreditsKg() - committed >= creditsUsed) return issuance;
         }
+        throw new IllegalArgumentException("Insufficient uncommitted subsidy credits in any single season");
     }
 
     /**
@@ -427,6 +456,11 @@ public class MarketOrderService {
                 .collect(Collectors.toList());
     }
 
+    private MarketOrderEntity requireOrderForUpdate(Long orderId) {
+        return orderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new IllegalArgumentException("Order not found with id: " + orderId));
+    }
+
     private MarketOrderResponseDTO mapToDTO(MarketOrderEntity order,
                                             ProductListingEntity listing,
                                             UserEntity farmer,
@@ -449,10 +483,8 @@ public class MarketOrderService {
                 .priceLkrPerKg(listing != null ? listing.getPriceLkrPerKg() : null)
                 // The token the farmer's wallet transfers from; null once they
                 // have no issuance to draw on.
-                .creditTokenId(order.getCreditsUsed() > 0
-                        ? (order.getCreditTokenId() != null ? order.getCreditTokenId()
-                                : creditService.findActiveCreditTokenId(order.getFarmerId()).orElse(null))
-                        : null)
+                .creditTokenId(order.getCreditTokenId())
+                .season(order.getSeason())
                 .tokenType(order.getTokenType())
                 .status(order.getStatus())
                 .creditTransferHash(order.getCreditTransferHash())

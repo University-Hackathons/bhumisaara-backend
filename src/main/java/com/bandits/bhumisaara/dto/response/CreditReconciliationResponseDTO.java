@@ -29,6 +29,8 @@ public class CreditReconciliationResponseDTO {
     private String season;
 
     private Integer totalIssuedCredits;
+    /** Credits transferred by completed or disputed orders in this season. */
+    private Integer spentCredits;
     /** Burned to settle a paid redemption claim. */
     private Integer totalRedeemedCredits;
     /** Spent by farmers on completed orders but not yet redeemed. */
