@@ -44,6 +44,10 @@ class ConcurrentLedgerIntegrationTest {
     @Autowired BatchTransferRepository transferRepository;
     @Autowired DistributionLogRepository distributionLogs;
     @Autowired DistributionService distributionService;
+    @Autowired UserNotificationRepository notifications;
+    @Autowired DisputeInvestigationRepository investigations;
+    @Autowired DisputeInvestigationEventRepository investigationEvents;
+    @Autowired DisputeInvestigationService investigationService;
     @MockitoBean ChainTransactionVerifier chainVerifier;
 
     private UserEntity user(Role role) {
@@ -77,6 +81,55 @@ class ConcurrentLedgerIntegrationTest {
             for (Future<?> future : futures) future.get(15, TimeUnit.SECONDS);
             return succeeded.get();
         } finally { executor.shutdownNow(); }
+    }
+
+    @Test
+    void orderPlacementAndReadyCreateNotificationsForTheRightAccounts() {
+        UserEntity farmer = user(Role.FARMER), seller = user(Role.PRIVATE_AGRO_DEALER);
+        var listing = listings.save(ProductListingEntity.builder().sellerId(seller.getUserId())
+                .productName("Urea").fertilizerType("Urea").isOrganic(false)
+                .priceLkrPerKg(100).availableKg(50).isSubsidyEligible(true).build());
+        as(farmer);
+        var order = orderService.placeOrder(PlaceOrderRequestDTO.builder()
+                .listingId(listing.getListingId()).quantityKg(5).creditsUsed(0).build());
+        assertTrue(notifications.findTop50ByUserIdOrderByCreatedAtDescIdDesc(farmer.getUserId()).stream()
+                .anyMatch(n -> n.getKind().equals("ORDER_PLACED")));
+        assertTrue(notifications.findTop50ByUserIdOrderByCreatedAtDescIdDesc(seller.getUserId()).stream()
+                .anyMatch(n -> n.getKind().equals("ORDER_PLACED")));
+        as(seller);
+        orderService.markReady(order.getOrderId());
+        assertTrue(notifications.findTop50ByUserIdOrderByCreatedAtDescIdDesc(farmer.getUserId()).stream()
+                .anyMatch(n -> n.getKind().equals("ORDER_READY")));
+        assertFalse(notifications.findTop50ByUserIdOrderByCreatedAtDescIdDesc(seller.getUserId()).stream()
+                .anyMatch(n -> n.getKind().equals("ORDER_READY")));
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void disputeInvestigationKeepsOriginalOrderDisputedAndAppendsFindings() {
+        UserEntity farmer = user(Role.FARMER), seller = user(Role.PRIVATE_AGRO_DEALER), staff = user(Role.GOVERNMENT_ADMIN);
+        var listing = listings.save(ProductListingEntity.builder().sellerId(seller.getUserId())
+                .productName("MOP").fertilizerType("MOP").isOrganic(false)
+                .priceLkrPerKg(100).availableKg(30).isSubsidyEligible(true).build());
+        as(farmer);
+        var order = orderService.placeOrder(PlaceOrderRequestDTO.builder()
+                .listingId(listing.getListingId()).quantityKg(5).creditsUsed(0).build());
+        as(seller);
+        orderService.markReady(order.getOrderId());
+        as(farmer);
+        orderService.confirmOrder(order.getOrderId(), null);
+        orderService.disputeOrder(order.getOrderId());
+        var caseFile = investigations.findByDisputeTypeAndRecordId("ORDER", order.getOrderId()).orElseThrow();
+        assertEquals("OPEN", caseFile.getStatus());
+        assertEquals(1, investigationEvents.findByInvestigationIdOrderByCreatedAtAscIdAsc(caseFile.getId()).size());
+        as(staff);
+        investigationService.update(caseFile.getId(), "IN_REVIEW", "Contacted farmer");
+        investigationService.update(caseFile.getId(), "RESOLVED", "Delivery confirmed");
+        assertEquals(OrderStatus.DISPUTED, orders.findById(order.getOrderId()).orElseThrow().getStatus());
+        assertEquals(3, investigationEvents.findByInvestigationIdOrderByCreatedAtAscIdAsc(caseFile.getId()).size());
+        assertTrue(notifications.findTop50ByUserIdOrderByCreatedAtDescIdDesc(farmer.getUserId()).stream()
+                .anyMatch(n -> n.getKind().equals("DISPUTE_UPDATED")));
+        SecurityContextHolder.clearContext();
     }
 
     @Test

@@ -9,7 +9,6 @@ import com.bandits.bhumisaara.entity.UserEntity;
 import com.bandits.bhumisaara.enums.RequestStatus;
 import com.bandits.bhumisaara.repository.FertilizerRequestRepository;
 import com.bandits.bhumisaara.security.CurrentUserProvider;
-import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,11 +18,18 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
-@RequiredArgsConstructor
 public class FertilizerRequestService {
 
     private final FertilizerRequestRepository requestRepository;
     private final CurrentUserProvider currentUserProvider;
+    private final NotificationService notifications;
+
+    public FertilizerRequestService(FertilizerRequestRepository requestRepository,
+            CurrentUserProvider currentUserProvider, NotificationService notifications) {
+        this.requestRepository = requestRepository;
+        this.currentUserProvider = currentUserProvider;
+        this.notifications = notifications;
+    }
 
     /**
      * Raises a request for the authenticated farmer. The farmer is taken from the
@@ -59,7 +65,10 @@ public class FertilizerRequestService {
                 .status(RequestStatus.PENDING)
                 .build();
 
-        return mapToDTO(requestRepository.save(entity));
+        FertilizerRequestEntity saved = requestRepository.save(entity);
+        notifications.notifyUser(farmer.getUserId(), "APPLICATION_SUBMITTED",
+                "Your " + fertilizerType + " application for " + season + " was submitted.", "/applications-history");
+        return mapToDTO(saved);
     }
 
     /** The authenticated farmer's own request history, newest first. */
@@ -152,7 +161,11 @@ public class FertilizerRequestService {
         entity.setReviewedByOfficer(officer);
         entity.setReviewedAt(LocalDateTime.now());
 
-        return mapToDTO(requestRepository.save(entity));
+        FertilizerRequestEntity saved = requestRepository.save(entity);
+        notifications.notifyUser(entity.getFarmer().getUserId(), "APPLICATION_REVIEWED",
+                "Your " + entity.getFertilizerType() + " application was " + review.getStatus().name().toLowerCase() + ".",
+                "/applications-history");
+        return mapToDTO(saved);
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────

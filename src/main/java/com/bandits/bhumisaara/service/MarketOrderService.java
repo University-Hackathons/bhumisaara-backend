@@ -14,7 +14,6 @@ import com.bandits.bhumisaara.repository.MarketOrderRepository;
 import com.bandits.bhumisaara.repository.ProductListingRepository;
 import com.bandits.bhumisaara.repository.UserRepository;
 import com.bandits.bhumisaara.security.CurrentUserProvider;
-import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,7 +51,6 @@ import java.util.stream.Collectors;
  * conversion.
  */
 @Service
-@RequiredArgsConstructor
 public class MarketOrderService {
     @Transactional(readOnly = true)
     public PageResponseDTO<MarketOrderResponseDTO> getOrderPage(String scope, int page, int size) {
@@ -78,6 +76,24 @@ public class MarketOrderService {
     private final UserRepository userRepository;
     private final CurrentUserProvider currentUserProvider;
     private final ChainTransactionVerifier chainVerifier;
+    private final NotificationService notifications;
+    private final DisputeInvestigationService disputeInvestigations;
+
+    public MarketOrderService(MarketOrderRepository orderRepository, ProductListingRepository listingRepository,
+            ProductListingService listingService, SubsidyCreditService creditService,
+            UserRepository userRepository, CurrentUserProvider currentUserProvider,
+            ChainTransactionVerifier chainVerifier, NotificationService notifications,
+            DisputeInvestigationService disputeInvestigations) {
+        this.orderRepository = orderRepository;
+        this.listingRepository = listingRepository;
+        this.listingService = listingService;
+        this.creditService = creditService;
+        this.userRepository = userRepository;
+        this.currentUserProvider = currentUserProvider;
+        this.chainVerifier = chainVerifier;
+        this.notifications = notifications;
+        this.disputeInvestigations = disputeInvestigations;
+    }
 
     /**
      * Prices a proposed order without placing it, so the marketplace can show a
@@ -161,6 +177,8 @@ public class MarketOrderService {
                 .status(OrderStatus.PENDING_CONFIRMATION)
                 .build());
 
+        notifications.notifyUser(saved.getSellerId(), "ORDER_PLACED", "A new order needs your attention.", "/incoming-orders");
+        notifications.notifyUser(saved.getFarmerId(), "ORDER_PLACED", "Your order was placed.", "/my-orders");
         return mapToDTO(saved, reservedListing, farmer, seller);
     }
 
@@ -184,8 +202,9 @@ public class MarketOrderService {
 
         order.setStatus(OrderStatus.CONFIRMED);
         order.setConfirmedAt(LocalDateTime.now());
-
-        return mapSingle(orderRepository.save(order));
+        MarketOrderEntity saved = orderRepository.save(order);
+        notifications.notifyUser(saved.getFarmerId(), "ORDER_READY", "Your order is ready to collect.", "/my-orders");
+        return mapSingle(saved);
     }
 
     /**
@@ -240,8 +259,9 @@ public class MarketOrderService {
 
         order.setStatus(OrderStatus.COMPLETED);
         order.setCompletedAt(LocalDateTime.now());
-
-        return mapSingle(orderRepository.save(order));
+        MarketOrderEntity saved = orderRepository.save(order);
+        notifications.notifyUser(saved.getSellerId(), "ORDER_COMPLETED", "An order was collected and credits transferred.", "/incoming-orders");
+        return mapSingle(saved);
     }
 
     /**
@@ -308,8 +328,9 @@ public class MarketOrderService {
 
         order.setStatus(OrderStatus.DISPUTED);
         order.setDisputedAt(LocalDateTime.now());
-
-        return mapSingle(orderRepository.save(order));
+        MarketOrderEntity saved = orderRepository.save(order);
+        disputeInvestigations.open("ORDER", saved.getOrderId(), farmer.getUserId());
+        return mapSingle(saved);
     }
 
     @Transactional(readOnly = true)

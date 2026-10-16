@@ -21,7 +21,6 @@ import com.bandits.bhumisaara.repository.HandoverSackRepository;
 import com.bandits.bhumisaara.repository.SackRepository;
 import com.bandits.bhumisaara.repository.UserRepository;
 import com.bandits.bhumisaara.security.CurrentUserProvider;
-import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,7 +48,6 @@ import java.util.stream.Collectors;
  * admin → officer transfer, which only moves custody.
  */
 @Service
-@RequiredArgsConstructor
 public class DistributionService {
     @Transactional(readOnly = true)
     public com.bandits.bhumisaara.dto.response.DistributionStatsDTO getOfficerStats() {
@@ -83,6 +81,23 @@ public class DistributionService {
     private final UserRepository userRepository;
     private final CurrentUserProvider currentUserProvider;
     private final ChainTransactionVerifier chainVerifier;
+    private final DisputeInvestigationService disputeInvestigations;
+
+    public DistributionService(DistributionLogRepository distributionLogRepository,
+            HandoverSackRepository handoverSackRepository, FertilizerRequestRepository requestRepository,
+            FertilizerBatchRepository batchRepository, SackRepository sackRepository,
+            UserRepository userRepository, CurrentUserProvider currentUserProvider,
+            ChainTransactionVerifier chainVerifier, DisputeInvestigationService disputeInvestigations) {
+        this.distributionLogRepository = distributionLogRepository;
+        this.handoverSackRepository = handoverSackRepository;
+        this.requestRepository = requestRepository;
+        this.batchRepository = batchRepository;
+        this.sackRepository = sackRepository;
+        this.userRepository = userRepository;
+        this.currentUserProvider = currentUserProvider;
+        this.chainVerifier = chainVerifier;
+        this.disputeInvestigations = disputeInvestigations;
+    }
 
     /**
      * Approved requests from farmers in the calling officer's own area that
@@ -280,8 +295,9 @@ public class DistributionService {
 
         entity.setDisputed(true);
         entity.setDisputedAt(LocalDateTime.now());
-
-        return mapHistory(List.of(distributionLogRepository.save(entity))).get(0);
+        DistributionLogEntity saved = distributionLogRepository.save(entity);
+        disputeInvestigations.open("HANDOVER", saved.getDistributionId(), farmer.getUserId());
+        return mapHistory(List.of(saved)).get(0);
     }
 
     // ─── Validation helpers ──────────────────────────────────────────────────

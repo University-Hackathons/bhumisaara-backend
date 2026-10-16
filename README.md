@@ -119,6 +119,8 @@ Production and staging require an existing base schema. Flyway baselines an exis
 
 The migrations attribute historical orders and claims to a season only when their token and related issuances or earned orders identify exactly one season. Ambiguous older rows remain unattributed, are excluded from seasonal reconciliation, and block further credit commitments for that account until an operator resolves them. New orders and claims always record their actual season and token ID.
 
+Migration V4 creates per-user notifications and dispute investigation records, including an append-only event history. It imports existing disputed orders and handovers as open investigations while preserving their original disputed flags and timestamps. The `/notifications` API is scoped to the authenticated user. `/dispute-investigations` permits government and system administrators to review cases and record findings; closing a case does not reverse the original blockchain transaction. The GitHub Actions workflow runs backend tests on Java 21.
+
 After packaging, a production launch can use:
 
 ```bash
